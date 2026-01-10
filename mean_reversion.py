@@ -1,68 +1,60 @@
-
 import yfinance as yf
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-#ticker symbols for pairs trading
-T1 = "AAPL"
-T2 = "MSFT"
+# ticker symbols for pairs trading
+t1="AAPL"
+t2="MSFT"
 
-START_DATE = "2024-01-01"
-LOOKBACK = 20
-ENTRY_Z = 2.0
-STOP_Z = 3.5
+start="2024-01-01"
+lb=20
+entry_z=2.0
+stop_z=3.5
 
-#data download
-prices = yf.download([T1, T2], start=START_DATE)["Close"].dropna()
-s1, s2 = prices[T1], prices[T2]
+# data download
+prices=yf.download([t1,t2],start=start)["Close"].dropna()
+p1,p2=prices[t1],prices[t2]
 
-#hedge ratio and spread calculation
+# hedge ratio and spread calculation
+hr=np.polyfit(p2,p1,1)[0]
+spread=p1-hr*p2
 
-hedge_ratio = np.polyfit(s2, s1, 1)[0]
-spread = s1 - hedge_ratio * s2
+# z-score calculation
+mu=spread.rolling(lb).mean()
+sigma=spread.rolling(lb).std()
+z=(spread-mu)/sigma
+z=z.shift(1).dropna()
 
-#z-score calculation
+# trading signals
+sig=pd.Series(0,index=z.index)
+sig[z>entry_z]=-1    # short spread
+sig[z<-entry_z]=1    # long spread
+sig[abs(z)>stop_z]=0 # emergency exit
 
-mu = spread.rolling(LOOKBACK).mean()
-sigma = spread.rolling(LOOKBACK).std()
-z_score = ((spread - mu) / sigma).shift(1)
-z_score = z_score.dropna()
+# return calculation
+r1=p1.pct_change()
+r2=p2.pct_change()
 
-#reading signals
+str_ret=sig.shift(1)*(r1-hr*r2)
+str_ret=str_ret.dropna()
 
-signals = pd.Series(0, index=z_score.index)
-signals[z_score > ENTRY_Z] = -1     # short spread
-signals[z_score < -ENTRY_Z] = 1     # long spread
-signals[abs(z_score) > STOP_Z] = 0  # emergency exit
+eq_curve=(1+str_ret).cumprod()
 
-#return calculation
+# performance metrics
+tdays=252
+tot_ret=eq_curve.iloc[-1]-1
+ann_vol=str_ret.std()*np.sqrt(tdays)
+ann_ret=eq_curve.iloc[-1]**(tdays/len(eq_curve))-1
+sharpe=ann_ret/ann_vol
 
-ret1 = s1.pct_change()
-ret2 = s2.pct_change()
+print("Total Return:",round(tot_ret*100,2),"%")
+print("Annualized Return:",round(ann_ret*100,2),"%")
+print("Sharpe Ratio:",round(sharpe,2))
 
-strategy_returns = signals.shift(1) * (ret1 - hedge_ratio * ret2)
-strategy_returns = strategy_returns.dropna()
-
-equity_curve = (1 + strategy_returns).cumprod()
-
-
-#performance metrics
-
-trading_days = 252
-total_return = equity_curve.iloc[-1] - 1
-annual_vol = strategy_returns.std() * np.sqrt(trading_days)
-annual_return = equity_curve.iloc[-1] ** (trading_days / len(equity_curve)) - 1
-sharpe = annual_return / annual_vol
-
-print("Total Return:", round(total_return * 100, 2), "%")
-print("Annualized Return:", round(annual_return * 100, 2), "%")
-print("Sharpe Ratio:", round(sharpe, 2))
-
-#visualization
-
-plt.figure(figsize=(10, 5))
-plt.plot(equity_curve)
+# visualization
+plt.figure(figsize=(10,5))
+plt.plot(eq_curve)
 plt.title("Mean Reversion Pairs Trading Equity Curve")
 plt.xlabel("Date")
 plt.ylabel("Equity")
